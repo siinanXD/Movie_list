@@ -13,8 +13,9 @@ This module is responsible for:
 
 import random
 import statistics
-
+import requests
 import movie_storage_sql as storage
+import omdb_api
 
 
 def print_menu() -> None:
@@ -351,6 +352,26 @@ def execute_choice(choice: str) -> bool:
 
     action()
     return True
+
+
+def command_add_movie() -> None:
+    """
+    Add a movie using OMDb API.
+    """
+    title = prompt_non_empty_string("Enter movie name: ")
+
+    data = omdb_api.fetch_movie_data(title)
+
+    if data is None:
+        print("Could not retrieve movie information.")
+        return
+
+    year = int(data["Year"])
+    rating = float(data["imdbRating"]) if data["imdbRating"] != "N/A" else 0.0
+
+    storage.add_movie(title, year, rating)
+
+    print(f"Movie added: {title} ({year}) rating {rating}")
 
 
 def main() -> None:
