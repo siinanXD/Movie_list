@@ -3,7 +3,7 @@ movie_storage_sql.py
 
 SQLite storage layer using SQLAlchemy.
 Supports multiple users, where each user has their own movie collection.
-Each movie can also store a personal note.
+Each movie can also store a personal note, IMDb id, and origin country data.
 """
 
 from pathlib import Path
@@ -44,6 +44,9 @@ def initialize_database() -> None:
             rating REAL NOT NULL,
             poster_url TEXT,
             note TEXT,
+            imdb_id TEXT,
+            country TEXT,
+            country_flag TEXT,
             UNIQUE(user_id, title),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
@@ -69,25 +72,23 @@ def ensure_movies_table_columns() -> None:
         columns = [row[1] for row in result.fetchall()]
 
         if "poster_url" not in columns:
-            connection.execute(
-                text(
-                    """
-                    ALTER TABLE movies
-                    ADD COLUMN poster_url TEXT
-                    """
-                )
-            )
+            connection.execute(text("ALTER TABLE movies ADD COLUMN poster_url TEXT"))
             connection.commit()
 
         if "note" not in columns:
-            connection.execute(
-                text(
-                    """
-                    ALTER TABLE movies
-                    ADD COLUMN note TEXT
-                    """
-                )
-            )
+            connection.execute(text("ALTER TABLE movies ADD COLUMN note TEXT"))
+            connection.commit()
+
+        if "imdb_id" not in columns:
+            connection.execute(text("ALTER TABLE movies ADD COLUMN imdb_id TEXT"))
+            connection.commit()
+
+        if "country" not in columns:
+            connection.execute(text("ALTER TABLE movies ADD COLUMN country TEXT"))
+            connection.commit()
+
+        if "country_flag" not in columns:
+            connection.execute(text("ALTER TABLE movies ADD COLUMN country_flag TEXT"))
             connection.commit()
 
 
@@ -155,34 +156,6 @@ def create_user(name: str) -> dict | None:
     return {"id": row[0], "name": row[1]}
 
 
-def get_user_by_name(name: str) -> dict | None:
-    """
-    Find a user by name.
-
-    Args:
-        name: Name of the user.
-
-    Returns:
-        dict | None: The user if found, otherwise None.
-    """
-    query = text(
-        """
-        SELECT id, name
-        FROM users
-        WHERE name = :name
-        """
-    )
-
-    with engine.connect() as connection:
-        result = connection.execute(query, {"name": name})
-        row = result.fetchone()
-
-    if row is None:
-        return None
-
-    return {"id": row[0], "name": row[1]}
-
-
 def list_movies(user_id: int) -> dict:
     """
     Return all movies for a specific user.
@@ -195,7 +168,7 @@ def list_movies(user_id: int) -> dict:
     """
     query = text(
         """
-        SELECT title, year, rating, poster_url, note
+        SELECT title, year, rating, poster_url, note, imdb_id, country, country_flag
         FROM movies
         WHERE user_id = :user_id
         ORDER BY title COLLATE NOCASE
@@ -212,6 +185,9 @@ def list_movies(user_id: int) -> dict:
             "rating": row[2],
             "poster_url": row[3] or "",
             "note": row[4] or "",
+            "imdb_id": row[5] or "",
+            "country": row[6] or "",
+            "country_flag": row[7] or "",
         }
         for row in rows
     }
@@ -223,6 +199,9 @@ def add_movie(
     year: int,
     rating: float,
     poster_url: str = "",
+    imdb_id: str = "",
+    country: str = "",
+    country_flag: str = "",
 ) -> bool:
     """
     Add a movie for a specific user.
@@ -233,14 +212,37 @@ def add_movie(
         year: Release year.
         rating: IMDb rating.
         poster_url: Poster image URL.
+        imdb_id: IMDb identifier.
+        country: Origin country.
+        country_flag: Emoji flag of the origin country.
 
     Returns:
         bool: True if added successfully, otherwise False.
     """
     query = text(
         """
-        INSERT INTO movies (user_id, title, year, rating, poster_url, note)
-        VALUES (:user_id, :title, :year, :rating, :poster_url, :note)
+        INSERT INTO movies (
+            user_id,
+            title,
+            year,
+            rating,
+            poster_url,
+            note,
+            imdb_id,
+            country,
+            country_flag
+        )
+        VALUES (
+            :user_id,
+            :title,
+            :year,
+            :rating,
+            :poster_url,
+            :note,
+            :imdb_id,
+            :country,
+            :country_flag
+        )
         """
     )
 
@@ -255,6 +257,9 @@ def add_movie(
                     "rating": rating,
                     "poster_url": poster_url,
                     "note": "",
+                    "imdb_id": imdb_id,
+                    "country": country,
+                    "country_flag": country_flag,
                 },
             )
             connection.commit()
