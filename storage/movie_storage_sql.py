@@ -3,6 +3,7 @@ movie_storage_sql.py
 
 SQLite storage layer using SQLAlchemy.
 Supports multiple users, where each user has their own movie collection.
+Each movie can also store a personal note.
 """
 
 from pathlib import Path
@@ -42,6 +43,7 @@ def initialize_database() -> None:
             year INTEGER NOT NULL,
             rating REAL NOT NULL,
             poster_url TEXT,
+            note TEXT,
             UNIQUE(user_id, title),
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
@@ -72,6 +74,17 @@ def ensure_movies_table_columns() -> None:
                     """
                     ALTER TABLE movies
                     ADD COLUMN poster_url TEXT
+                    """
+                )
+            )
+            connection.commit()
+
+        if "note" not in columns:
+            connection.execute(
+                text(
+                    """
+                    ALTER TABLE movies
+                    ADD COLUMN note TEXT
                     """
                 )
             )
@@ -182,7 +195,7 @@ def list_movies(user_id: int) -> dict:
     """
     query = text(
         """
-        SELECT title, year, rating, poster_url
+        SELECT title, year, rating, poster_url, note
         FROM movies
         WHERE user_id = :user_id
         ORDER BY title COLLATE NOCASE
@@ -198,6 +211,7 @@ def list_movies(user_id: int) -> dict:
             "year": row[1],
             "rating": row[2],
             "poster_url": row[3] or "",
+            "note": row[4] or "",
         }
         for row in rows
     }
@@ -225,8 +239,8 @@ def add_movie(
     """
     query = text(
         """
-        INSERT INTO movies (user_id, title, year, rating, poster_url)
-        VALUES (:user_id, :title, :year, :rating, :poster_url)
+        INSERT INTO movies (user_id, title, year, rating, poster_url, note)
+        VALUES (:user_id, :title, :year, :rating, :poster_url, :note)
         """
     )
 
@@ -240,6 +254,7 @@ def add_movie(
                     "year": year,
                     "rating": rating,
                     "poster_url": poster_url,
+                    "note": "",
                 },
             )
             connection.commit()
@@ -279,14 +294,14 @@ def delete_movie(user_id: int, title: str) -> bool:
     return result.rowcount > 0
 
 
-def update_movie(user_id: int, title: str, rating: float) -> bool:
+def update_movie_note(user_id: int, title: str, note: str) -> bool:
     """
-    Update a movie rating for a specific user.
+    Update the personal note of a movie for a specific user.
 
     Args:
         user_id: ID of the active user.
         title: Movie title.
-        rating: New rating.
+        note: Personal note for the movie.
 
     Returns:
         bool: True if updated, otherwise False.
@@ -294,7 +309,7 @@ def update_movie(user_id: int, title: str, rating: float) -> bool:
     query = text(
         """
         UPDATE movies
-        SET rating = :rating
+        SET note = :note
         WHERE user_id = :user_id AND title = :title
         """
     )
@@ -305,7 +320,7 @@ def update_movie(user_id: int, title: str, rating: float) -> bool:
             {
                 "user_id": user_id,
                 "title": title,
-                "rating": rating,
+                "note": note,
             },
         )
         connection.commit()
