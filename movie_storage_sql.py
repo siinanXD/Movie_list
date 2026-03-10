@@ -1,29 +1,32 @@
 """
 movie_storage_sql.py
 
-SQL storage layer for the movie project.
-Replaces the old JSON storage with SQLite using SQLAlchemy.
-
-The API stays compatible with the previous movie_storage.py so that
-movies.py does not need major changes.
+SQLite storage layer using SQLAlchemy.
+Stores movies with title, year, rating and poster URL.
 """
+
+from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
-DB_URL = "sqlite:///movies.db"
+BASE_DIR = Path(__file__).resolve().parent
+DB_PATH = BASE_DIR / "movies.db"
+
+DB_URL = f"sqlite:///{DB_PATH}"
 
 engine = create_engine(DB_URL, echo=False)
 
 
 def initialize_database() -> None:
-    """Create the movies table if it does not exist."""
+    """Create movies table if it does not exist."""
     create_table_query = text(
         """
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             title TEXT UNIQUE NOT NULL,
             year INTEGER NOT NULL,
-            rating REAL NOT NULL
+            rating REAL NOT NULL,
+            poster_url TEXT
         )
         """
     )
@@ -37,16 +40,12 @@ initialize_database()
 
 
 def list_movies() -> dict:
-    """
-    Retrieve all movies from the database.
-
-    Returns:
-        dict: Movie dictionary in the same structure as the JSON version.
-    """
+    """Return all movies."""
     query = text(
         """
-        SELECT title, year, rating
+        SELECT title, year, rating, poster_url
         FROM movies
+        ORDER BY title COLLATE NOCASE
         """
     )
 
@@ -55,31 +54,21 @@ def list_movies() -> dict:
         rows = result.fetchall()
 
     return {
-        row[0]: {"year": row[1], "rating": row[2]}
+        row[0]: {
+            "year": row[1],
+            "rating": row[2],
+            "poster_url": row[3],
+        }
         for row in rows
     }
 
 
-# ---- Compatibility Layer ----
-# Your movies.py still calls get_movies()
-# so we map it to list_movies().
-
-
-def get_movies() -> dict:
-    """
-    Compatibility wrapper for older code.
-
-    movies.py still calls get_movies(), so we simply return list_movies().
-    """
-    return list_movies()
-
-
-def add_movie(title: str, year: int, rating: float) -> None:
-    """Add a movie to the database."""
+def add_movie(title: str, year: int, rating: float, poster_url: str) -> None:
+    """Add a movie."""
     query = text(
         """
-        INSERT INTO movies (title, year, rating)
-        VALUES (:title, :year, :rating)
+        INSERT INTO movies (title, year, rating, poster_url)
+        VALUES (:title, :year, :rating, :poster_url)
         """
     )
 
@@ -91,16 +80,17 @@ def add_movie(title: str, year: int, rating: float) -> None:
                     "title": title,
                     "year": year,
                     "rating": rating,
+                    "poster_url": poster_url,
                 },
             )
             connection.commit()
             print(f"Movie '{title}' added successfully.")
-        except Exception as error:
-            print(f"Error adding movie: {error}")
+        except Exception:
+            print(f"Movie '{title}' already exists.")
 
 
 def delete_movie(title: str) -> None:
-    """Delete a movie from the database."""
+    """Delete a movie."""
     query = text(
         """
         DELETE FROM movies
@@ -113,13 +103,13 @@ def delete_movie(title: str) -> None:
         connection.commit()
 
         if result.rowcount == 0:
-            print(f"Movie '{title}' not found.")
+            print("Movie not found.")
         else:
             print(f"Movie '{title}' deleted successfully.")
 
 
 def update_movie(title: str, rating: float) -> None:
-    """Update the rating of a movie."""
+    """Update rating."""
     query = text(
         """
         UPDATE movies
@@ -139,6 +129,6 @@ def update_movie(title: str, rating: float) -> None:
         connection.commit()
 
         if result.rowcount == 0:
-            print(f"Movie '{title}' not found.")
+            print("Movie not found.")
         else:
             print(f"Movie '{title}' updated successfully.")

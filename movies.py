@@ -355,23 +355,24 @@ def execute_choice(choice: str) -> bool:
 
 
 def command_add_movie() -> None:
-    """
-    Add a movie using OMDb API.
-    """
-    title = prompt_non_empty_string("Enter movie name: ")
+    """Add a movie using OMDb API."""
+    title = input("Enter movie name: ").strip()
 
-    data = omdb_api.fetch_movie_data(title)
+    data = omdb_api.fetch_movie(title)
 
     if data is None:
-        print("Could not retrieve movie information.")
         return
 
-    year = int(data["Year"])
-    rating = float(data["imdbRating"]) if data["imdbRating"] != "N/A" else 0.0
+    title = data["Title"]
 
-    storage.add_movie(title, year, rating)
+    year = int(data["Year"][:4])
 
-    print(f"Movie added: {title} ({year}) rating {rating}")
+    rating_text = data.get("imdbRating", "0")
+    rating = float(rating_text) if rating_text != "N/A" else 0.0
+
+    poster_url = data.get("Poster", "")
+
+    storage.add_movie(title, year, rating, poster_url)
 
 
 def main() -> None:
