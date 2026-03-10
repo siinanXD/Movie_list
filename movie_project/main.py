@@ -21,8 +21,8 @@ from pathlib import Path
 import random
 import statistics
 
-import movie_storage_sql as storage
-import omdb_api
+from storage import movie_storage_sql as storage
+from api import omdb_api
 
 APP_TITLE = "My Movie App"
 BASE_DIR = Path(__file__).resolve().parent
