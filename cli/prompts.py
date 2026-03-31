@@ -1,91 +1,65 @@
-"""Reusable input prompt helpers for CLI interaction."""
+"""CLI prompt helper functions."""
 
 
-def prompt_non_empty_string(message: str) -> str:
-    """Prompt until a non-empty string is entered."""
+def prompt_choice(prompt: str, min_value: int = 0, max_value: int = 0) -> int:
+    """
+    Prompt the user for a numeric choice within a range.
+
+    Args:
+        prompt: The message to display.
+        min_value: Minimum allowed value.
+        max_value: Maximum allowed value.
+
+    Returns:
+        The validated integer choice.
+    """
     while True:
-        value = input(message).strip()
-        if value:
-            return value
-        print("Input cannot be empty.")
+        user_input = input(prompt).strip()
+
+        if not user_input.isdigit():
+            print("Invalid input. Please enter a number.")
+            continue
+
+        choice = int(user_input)
+
+        if choice < min_value or choice > max_value:
+            print(f"Please enter a number between {min_value} and {max_value}.")
+            continue
+
+        return choice
 
 
-
-def prompt_optional_string(message: str) -> str:
-    """Prompt once and return the raw stripped value, including empty input."""
-    return input(message).strip()
-
-
-
-def prompt_choice(message: str, min_value: int | None = None) -> int:
-    """Prompt until a valid integer choice is entered."""
+def prompt_int(prompt: str, min_value: int, max_value: int) -> int:
+    """Prompt the user for an integer within a range."""
     while True:
-        value = input(message).strip()
-        try:
-            number = int(value)
-        except ValueError:
-            print("Please enter a valid whole number.")
+        user_input = input(prompt).strip()
+
+        if not user_input.isdigit():
+            print("Invalid input. Please enter a number.")
             continue
 
-        if min_value is not None and number < min_value:
-            print(f"Please enter a number greater than or equal to {min_value}.")
+        value = int(user_input)
+
+        if value < min_value or value > max_value:
+            print(f"Please enter a value between {min_value} and {max_value}.")
             continue
 
-        return number
+        return value
 
 
-
-def prompt_float(
-    message: str,
-    min_value: float | None = None,
-    max_value: float | None = None,
-    allow_empty: bool = False,
-) -> float | None:
-    """Prompt until a valid float is entered, or return None when empty is allowed."""
+def prompt_float(prompt: str, min_value: float, max_value: float) -> float:
+    """Prompt the user for a float within a range."""
     while True:
-        value = input(message).strip()
-
-        if allow_empty and value == "":
-            return None
-
-        try:
-            number = float(value)
-        except ValueError:
-            print("Please enter a valid number.")
-            continue
-
-        if min_value is not None and number < min_value:
-            print(f"Please enter a number greater than or equal to {min_value}.")
-            continue
-
-        if max_value is not None and number > max_value:
-            print(f"Please enter a number less than or equal to {max_value}.")
-            continue
-
-        return number
-
-
-
-def prompt_int(
-    message: str,
-    min_value: int | None = None,
-    allow_empty: bool = False,
-) -> int | None:
-    """Prompt until a valid integer is entered, or return None when empty is allowed."""
-    while True:
-        value = input(message).strip()
-
-        if allow_empty and value == "":
-            return None
+        user_input = input(prompt).strip()
 
         try:
-            number = int(value)
+            value = float(user_input)
         except ValueError:
-            print("Please enter a valid whole number.")
+            print("Invalid input. Please enter a number.")
             continue
 
-        if min_value is not None and number < min_value:
-            print(f"Please enter a number greater than or equal to {min_value}.")
+        if value < min_value or value > max_value:
+            print(f"Please enter a value between {min_value} and {max_value}.")
             continue
 
-        return number
+        return value

@@ -1,34 +1,26 @@
-"""SQLite storage layer using SQLAlchemy for movie collections."""
+"""SQLite storage layer for the movie app."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import IntegrityError
 
-BASE_DIR = Path(__file__).resolve().parent.parent
-DB_PATH = BASE_DIR / "data" / "movies.db"
-DB_URL = f"sqlite:///{DB_PATH}"
-
-engine = create_engine(DB_URL, echo=False)
-
+DATABASE_URL = "sqlite:///movies.db"
+engine = create_engine(DATABASE_URL, echo=False)
 
 
 def initialize_database() -> None:
-    """Create tables and ensure the database schema is up to date."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    create_users_table_query = text(
+    """Create tables if they do not exist and add missing columns."""
+    create_users_table = text(
         """
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT UNIQUE NOT NULL
+            name TEXT NOT NULL UNIQUE
         )
         """
     )
 
-    create_movies_table_query = text(
+    create_movies_table = text(
         """
         CREATE TABLE IF NOT EXISTS movies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,159 +28,104 @@ def initialize_database() -> None:
             title TEXT NOT NULL,
             year INTEGER NOT NULL,
             rating REAL NOT NULL,
-            poster_url TEXT,
-            note TEXT,
-            imdb_id TEXT,
-            country TEXT,
-            country_flag TEXT,
-            UNIQUE(user_id, title),
-            FOREIGN KEY (user_id) REFERENCES users(id)
+            poster_url TEXT DEFAULT '',
+            note TEXT DEFAULT '',
+            imdb_id TEXT DEFAULT '',
+            country TEXT DEFAULT '',
+            country_flag TEXT DEFAULT '',
+            FOREIGN KEY (user_id) REFERENCES users (id),
+            UNIQUE(user_id, title)
         )
         """
     )
 
     with engine.connect() as connection:
-        connection.execute(create_users_table_query)
-        connection.execute(create_movies_table_query)
+        connection.execute(create_users_table)
+        connection.execute(create_movies_table)
         connection.commit()
 
-    ensure_movies_table_columns()
+    ensure_column_exists("movies", "poster_url", "TEXT DEFAULT ''")
+    ensure_column_exists("movies", "note", "TEXT DEFAULT ''")
+    ensure_column_exists("movies", "imdb_id", "TEXT DEFAULT ''")
+    ensure_column_exists("movies", "country", "TEXT DEFAULT ''")
+    ensure_column_exists("movies", "country_flag", "TEXT DEFAULT ''")
 
 
-
-def ensure_movies_table_columns() -> None:
-    """Add missing columns to older movie tables when necessary."""
-    pragma_query = text("PRAGMA table_info(movies)")
+def ensure_column_exists(table_name: str, column_name: str, column_definition: str) -> None:
+    """Add a column if it does not already exist."""
+    pragma_query = text(f"PRAGMA table_info({table_name})")
+    alter_query = text(
+        f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+    )
 
     with engine.connect() as connection:
-        result = connection.execute(pragma_query)
-        columns = [row[1] for row in result.fetchall()]
-
-        missing_columns = {
-            "poster_url": "ALTER TABLE movies ADD COLUMN poster_url TEXT",
-            "note": "ALTER TABLE movies ADD COLUMN note TEXT",
-            "imdb_id": "ALTER TABLE movies ADD COLUMN imdb_id TEXT",
-            "country": "ALTER TABLE movies ADD COLUMN country TEXT",
-            "country_flag": "ALTER TABLE movies ADD COLUMN country_flag TEXT",
+        existing_columns = {
+            row._mapping["name"]
+            for row in connection.execute(pragma_query)
         }
 
-        for column_name, alter_query in missing_columns.items():
-            if column_name not in columns:
-                connection.execute(text(alter_query))
-                connection.commit()
-
+        if column_name not in existing_columns:
+            connection.execute(alter_query)
+            connection.commit()
 
 
 def list_users() -> list[dict]:
-    """Return all users ordered by name."""
-    query = text(
-        """
-        SELECT id, name
-        FROM users
-        ORDER BY name COLLATE NOCASE
-        """
-    )
+    """Return all users."""
+    query = text("SELECT id, name FROM users ORDER BY name")
 
     with engine.connect() as connection:
-        result = connection.execute(query)
-        rows = result.fetchall()
+        rows = connection.execute(query).fetchall()
 
-    return [{"id": row[0], "name": row[1]} for row in rows]
+    return [
+        {
+            "id": row._mapping["id"],
+            "name": row._mapping["name"],
+        }
+        for row in rows
+    ]
 
 
+def add_user(name: str) -> int | None:
+    """Add a user and return the new id, or None if it already exists."""
+    query = text("INSERT INTO users (name) VALUES (:name)")
 
-def create_user(name: str) -> dict | None:
-    """Create a new user or return None when the name already exists."""
-    insert_query = text(
-        """
-        INSERT INTO users (name)
-        VALUES (:name)
-        """
-    )
-
-    select_query = text(
-        """
-        SELECT id, name
-        FROM users
-        WHERE name = :name
-        """
-    )
-
-    with engine.connect() as connection:
-        try:
-            connection.execute(insert_query, {"name": name})
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(query, {"name": name})
             connection.commit()
-        except IntegrityError:
-            return None
-
-        result = connection.execute(select_query, {"name": name})
-        row = result.fetchone()
-
-    if row is None:
+            return result.lastrowid
+    except IntegrityError:
         return None
-
-    return {"id": row[0], "name": row[1]}
-
 
 
 def list_movies(user_id: int) -> dict:
-    """Return all movies for a specific user."""
+    """Return all movies for a user as a nested dictionary."""
     query = text(
         """
         SELECT title, year, rating, poster_url, note, imdb_id, country, country_flag
         FROM movies
         WHERE user_id = :user_id
-        ORDER BY title COLLATE NOCASE
+        ORDER BY title
         """
     )
 
     with engine.connect() as connection:
-        result = connection.execute(query, {"user_id": user_id})
-        rows = result.fetchall()
+        rows = connection.execute(query, {"user_id": user_id}).fetchall()
 
-    return {
-        row[0]: {
-            "year": row[1],
-            "rating": row[2],
-            "poster_url": row[3] or "",
-            "note": row[4] or "",
-            "imdb_id": row[5] or "",
-            "country": row[6] or "",
-            "country_flag": row[7] or "",
+    movies = {}
+    for row in rows:
+        mapping = row._mapping
+        movies[mapping["title"]] = {
+            "year": mapping["year"],
+            "rating": mapping["rating"],
+            "poster_url": mapping["poster_url"] or "",
+            "note": mapping["note"] or "",
+            "imdb_id": mapping["imdb_id"] or "",
+            "country": mapping["country"] or "",
+            "country_flag": mapping["country_flag"] or "",
         }
-        for row in rows
-    }
 
-
-
-def get_movie_by_title(user_id: int, title: str) -> dict | None:
-    """Return a single movie record for a user by title."""
-    query = text(
-        """
-        SELECT title, year, rating, poster_url, note, imdb_id, country, country_flag
-        FROM movies
-        WHERE user_id = :user_id AND title = :title
-        """
-    )
-
-    with engine.connect() as connection:
-        result = connection.execute(query, {"user_id": user_id, "title": title})
-        row = result.fetchone()
-
-    if row is None:
-        return None
-
-    return {
-        "title": row[0],
-        "year": row[1],
-        "rating": row[2],
-        "poster_url": row[3] or "",
-        "note": row[4] or "",
-        "imdb_id": row[5] or "",
-        "country": row[6] or "",
-        "country_flag": row[7] or "",
-    }
-
+    return movies
 
 
 def add_movie(
@@ -197,40 +134,25 @@ def add_movie(
     year: int,
     rating: float,
     poster_url: str = "",
+    note: str = "",
     imdb_id: str = "",
     country: str = "",
     country_flag: str = "",
 ) -> bool:
-    """Add a movie for a specific user."""
+    """Add a movie for a user."""
     query = text(
         """
         INSERT INTO movies (
-            user_id,
-            title,
-            year,
-            rating,
-            poster_url,
-            note,
-            imdb_id,
-            country,
-            country_flag
+            user_id, title, year, rating, poster_url, note, imdb_id, country, country_flag
         )
         VALUES (
-            :user_id,
-            :title,
-            :year,
-            :rating,
-            :poster_url,
-            :note,
-            :imdb_id,
-            :country,
-            :country_flag
+            :user_id, :title, :year, :rating, :poster_url, :note, :imdb_id, :country, :country_flag
         )
         """
     )
 
-    with engine.connect() as connection:
-        try:
+    try:
+        with engine.connect() as connection:
             connection.execute(
                 query,
                 {
@@ -239,83 +161,23 @@ def add_movie(
                     "year": year,
                     "rating": rating,
                     "poster_url": poster_url,
-                    "note": "",
+                    "note": note,
                     "imdb_id": imdb_id,
                     "country": country,
                     "country_flag": country_flag,
                 },
             )
             connection.commit()
-            return True
-        except IntegrityError:
-            return False
-
+        return True
+    except IntegrityError:
+        return False
 
 
 def delete_movie(user_id: int, title: str) -> bool:
-    """Delete a movie for a specific user."""
+    """Delete a movie by title."""
     query = text(
         """
         DELETE FROM movies
-        WHERE user_id = :user_id AND title = :title
-        """
-    )
-
-    with engine.connect() as connection:
-        result = connection.execute(query, {"user_id": user_id, "title": title})
-        connection.commit()
-
-    return result.rowcount > 0
-
-
-
-def update_movie(
-    user_id: int,
-    current_title: str,
-    new_title: str,
-    new_year: int,
-    new_rating: float,
-    new_note: str,
-) -> bool:
-    """Update a movie's editable fields for a specific user."""
-    query = text(
-        """
-        UPDATE movies
-        SET title = :new_title,
-            year = :new_year,
-            rating = :new_rating,
-            note = :new_note
-        WHERE user_id = :user_id AND title = :current_title
-        """
-    )
-
-    with engine.connect() as connection:
-        try:
-            result = connection.execute(
-                query,
-                {
-                    "user_id": user_id,
-                    "current_title": current_title,
-                    "new_title": new_title,
-                    "new_year": new_year,
-                    "new_rating": new_rating,
-                    "new_note": new_note,
-                },
-            )
-            connection.commit()
-        except IntegrityError:
-            return False
-
-    return result.rowcount > 0
-
-
-
-def update_movie_note(user_id: int, title: str, note: str) -> bool:
-    """Update only the note of a movie for backward compatibility."""
-    query = text(
-        """
-        UPDATE movies
-        SET note = :note
         WHERE user_id = :user_id AND title = :title
         """
     )
@@ -326,7 +188,6 @@ def update_movie_note(user_id: int, title: str, note: str) -> bool:
             {
                 "user_id": user_id,
                 "title": title,
-                "note": note,
             },
         )
         connection.commit()
@@ -334,4 +195,101 @@ def update_movie_note(user_id: int, title: str, note: str) -> bool:
     return result.rowcount > 0
 
 
-initialize_database()
+def update_movie(
+    user_id: int,
+    old_title: str,
+    new_title: str,
+    new_year: int,
+    new_rating: float,
+    new_note: str,
+) -> bool:
+    """Update a movie's editable fields."""
+    query = text(
+        """
+        UPDATE movies
+        SET title = :new_title,
+            year = :new_year,
+            rating = :new_rating,
+            note = :new_note
+        WHERE user_id = :user_id AND title = :old_title
+        """
+    )
+
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(
+                query,
+                {
+                    "user_id": user_id,
+                    "old_title": old_title,
+                    "new_title": new_title,
+                    "new_year": new_year,
+                    "new_rating": new_rating,
+                    "new_note": new_note,
+                },
+            )
+            connection.commit()
+        return result.rowcount > 0
+    except IntegrityError:
+        return False
+
+
+def update_movie_country_flag(user_id: int, title: str, country_flag: str) -> bool:
+    """Update the country flag for a specific movie."""
+    query = text(
+        """
+        UPDATE movies
+        SET country_flag = :country_flag
+        WHERE user_id = :user_id AND title = :title
+        """
+    )
+
+    with engine.connect() as connection:
+        result = connection.execute(
+            query,
+            {
+                "user_id": user_id,
+                "title": title,
+                "country_flag": country_flag,
+            },
+        )
+        connection.commit()
+
+    return result.rowcount > 0
+
+
+def update_movie_metadata(
+    user_id: int,
+    title: str,
+    imdb_id: str,
+    country: str,
+    country_flag: str,
+    poster_url: str,
+) -> bool:
+    """Update stored metadata for an existing movie."""
+    query = text(
+        """
+        UPDATE movies
+        SET imdb_id = :imdb_id,
+            country = :country,
+            country_flag = :country_flag,
+            poster_url = :poster_url
+        WHERE user_id = :user_id AND title = :title
+        """
+    )
+
+    with engine.connect() as connection:
+        result = connection.execute(
+            query,
+            {
+                "user_id": user_id,
+                "title": title,
+                "imdb_id": imdb_id,
+                "country": country,
+                "country_flag": country_flag,
+                "poster_url": poster_url,
+            },
+        )
+        connection.commit()
+
+    return result.rowcount > 0
