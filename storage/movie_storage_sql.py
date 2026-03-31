@@ -1,10 +1,6 @@
-"""
-movie_storage_sql.py
+"""SQLite storage layer using SQLAlchemy for movie collections."""
 
-SQLite storage layer using SQLAlchemy.
-Supports multiple users, where each user has their own movie collection.
-Each movie can also store a personal note, IMDb id, and origin country data.
-"""
+from __future__ import annotations
 
 from pathlib import Path
 
@@ -18,11 +14,9 @@ DB_URL = f"sqlite:///{DB_PATH}"
 engine = create_engine(DB_URL, echo=False)
 
 
+
 def initialize_database() -> None:
-    """
-    Create the required database tables if they do not exist and
-    make sure older databases are migrated to the current schema.
-    """
+    """Create tables and ensure the database schema is up to date."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
     create_users_table_query = text(
@@ -61,45 +55,32 @@ def initialize_database() -> None:
     ensure_movies_table_columns()
 
 
+
 def ensure_movies_table_columns() -> None:
-    """
-    Add missing columns to older databases if necessary.
-    """
+    """Add missing columns to older movie tables when necessary."""
     pragma_query = text("PRAGMA table_info(movies)")
 
     with engine.connect() as connection:
         result = connection.execute(pragma_query)
         columns = [row[1] for row in result.fetchall()]
 
-        if "poster_url" not in columns:
-            connection.execute(text("ALTER TABLE movies ADD COLUMN poster_url TEXT"))
-            connection.commit()
+        missing_columns = {
+            "poster_url": "ALTER TABLE movies ADD COLUMN poster_url TEXT",
+            "note": "ALTER TABLE movies ADD COLUMN note TEXT",
+            "imdb_id": "ALTER TABLE movies ADD COLUMN imdb_id TEXT",
+            "country": "ALTER TABLE movies ADD COLUMN country TEXT",
+            "country_flag": "ALTER TABLE movies ADD COLUMN country_flag TEXT",
+        }
 
-        if "note" not in columns:
-            connection.execute(text("ALTER TABLE movies ADD COLUMN note TEXT"))
-            connection.commit()
+        for column_name, alter_query in missing_columns.items():
+            if column_name not in columns:
+                connection.execute(text(alter_query))
+                connection.commit()
 
-        if "imdb_id" not in columns:
-            connection.execute(text("ALTER TABLE movies ADD COLUMN imdb_id TEXT"))
-            connection.commit()
-
-        if "country" not in columns:
-            connection.execute(text("ALTER TABLE movies ADD COLUMN country TEXT"))
-            connection.commit()
-
-        if "country_flag" not in columns:
-            connection.execute(text("ALTER TABLE movies ADD COLUMN country_flag TEXT"))
-            connection.commit()
 
 
 def list_users() -> list[dict]:
-    """
-    Return all users ordered by name.
-
-    Returns:
-        list[dict]: Example:
-            [{"id": 1, "name": "John"}, {"id": 2, "name": "Sara"}]
-    """
+    """Return all users ordered by name."""
     query = text(
         """
         SELECT id, name
@@ -115,16 +96,9 @@ def list_users() -> list[dict]:
     return [{"id": row[0], "name": row[1]} for row in rows]
 
 
+
 def create_user(name: str) -> dict | None:
-    """
-    Create a new user.
-
-    Args:
-        name: Name of the user.
-
-    Returns:
-        dict | None: The created user or None if the name already exists.
-    """
+    """Create a new user or return None when the name already exists."""
     insert_query = text(
         """
         INSERT INTO users (name)
@@ -156,16 +130,9 @@ def create_user(name: str) -> dict | None:
     return {"id": row[0], "name": row[1]}
 
 
+
 def list_movies(user_id: int) -> dict:
-    """
-    Return all movies for a specific user.
-
-    Args:
-        user_id: ID of the active user.
-
-    Returns:
-        dict: Movies for the selected user.
-    """
+    """Return all movies for a specific user."""
     query = text(
         """
         SELECT title, year, rating, poster_url, note, imdb_id, country, country_flag
@@ -193,6 +160,37 @@ def list_movies(user_id: int) -> dict:
     }
 
 
+
+def get_movie_by_title(user_id: int, title: str) -> dict | None:
+    """Return a single movie record for a user by title."""
+    query = text(
+        """
+        SELECT title, year, rating, poster_url, note, imdb_id, country, country_flag
+        FROM movies
+        WHERE user_id = :user_id AND title = :title
+        """
+    )
+
+    with engine.connect() as connection:
+        result = connection.execute(query, {"user_id": user_id, "title": title})
+        row = result.fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "title": row[0],
+        "year": row[1],
+        "rating": row[2],
+        "poster_url": row[3] or "",
+        "note": row[4] or "",
+        "imdb_id": row[5] or "",
+        "country": row[6] or "",
+        "country_flag": row[7] or "",
+    }
+
+
+
 def add_movie(
     user_id: int,
     title: str,
@@ -203,22 +201,7 @@ def add_movie(
     country: str = "",
     country_flag: str = "",
 ) -> bool:
-    """
-    Add a movie for a specific user.
-
-    Args:
-        user_id: ID of the active user.
-        title: Movie title.
-        year: Release year.
-        rating: IMDb rating.
-        poster_url: Poster image URL.
-        imdb_id: IMDb identifier.
-        country: Origin country.
-        country_flag: Emoji flag of the origin country.
-
-    Returns:
-        bool: True if added successfully, otherwise False.
-    """
+    """Add a movie for a specific user."""
     query = text(
         """
         INSERT INTO movies (
@@ -268,17 +251,9 @@ def add_movie(
             return False
 
 
+
 def delete_movie(user_id: int, title: str) -> bool:
-    """
-    Delete a movie for a specific user.
-
-    Args:
-        user_id: ID of the active user.
-        title: Movie title.
-
-    Returns:
-        bool: True if deleted, otherwise False.
-    """
+    """Delete a movie for a specific user."""
     query = text(
         """
         DELETE FROM movies
@@ -287,30 +262,56 @@ def delete_movie(user_id: int, title: str) -> bool:
     )
 
     with engine.connect() as connection:
-        result = connection.execute(
-            query,
-            {
-                "user_id": user_id,
-                "title": title,
-            },
-        )
+        result = connection.execute(query, {"user_id": user_id, "title": title})
         connection.commit()
 
     return result.rowcount > 0
 
 
+
+def update_movie(
+    user_id: int,
+    current_title: str,
+    new_title: str,
+    new_year: int,
+    new_rating: float,
+    new_note: str,
+) -> bool:
+    """Update a movie's editable fields for a specific user."""
+    query = text(
+        """
+        UPDATE movies
+        SET title = :new_title,
+            year = :new_year,
+            rating = :new_rating,
+            note = :new_note
+        WHERE user_id = :user_id AND title = :current_title
+        """
+    )
+
+    with engine.connect() as connection:
+        try:
+            result = connection.execute(
+                query,
+                {
+                    "user_id": user_id,
+                    "current_title": current_title,
+                    "new_title": new_title,
+                    "new_year": new_year,
+                    "new_rating": new_rating,
+                    "new_note": new_note,
+                },
+            )
+            connection.commit()
+        except IntegrityError:
+            return False
+
+    return result.rowcount > 0
+
+
+
 def update_movie_note(user_id: int, title: str, note: str) -> bool:
-    """
-    Update the personal note of a movie for a specific user.
-
-    Args:
-        user_id: ID of the active user.
-        title: Movie title.
-        note: Personal note for the movie.
-
-    Returns:
-        bool: True if updated, otherwise False.
-    """
+    """Update only the note of a movie for backward compatibility."""
     query = text(
         """
         UPDATE movies
